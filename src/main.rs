@@ -5,23 +5,38 @@
 //
 extern crate byteorder;
 
-use std::net::UdpSocket;
+use std::net::*;
+mod reader;
+mod tftp;
+mod writer;
 
 pub fn main() -> std::io::Result<()> {
-    let socket = UdpSocket::bind("127.0.0.1:34254")?;
-    // Receives a single datagram message on the socket. If `buf` is too small to hold
-    // the message, it will be cut off.
-    let mut buf = [0; 10];
+    let addr = "127.0.0.1:69";
+    let socket = UdpSocket::bind(addr)?;
+    let mut bufin = [0; 512];
+    let mut bufout = [0; 4 + 512];
     loop {
-        let (amt, src) = socket.recv_from(&mut buf)?;
-
-        // Redeclare `buf` as slice of the received data and send reverse data back to origin.
-        let buf = &mut buf[..amt];
-        println!("{:x?}", buf);
-        buf.reverse();
-        socket.send_to(buf, &src)?;
+        match socket.recv_from(&mut bufin) {
+            Ok((size, src)) => match tftp::Packet::parse(&mut bufin[..size]) {
+                Ok(packet) => {
+                    match handle(addr.parse().unwrap(), src, packet) {
+                        Some(packet) => {
+                            let size = packet.write(&mut bufout)?;
+                            socket.send_to(&bufout[..size], &src)?;
+                        }
+                        None => {}
+                    };
+                }
+                Err(error) => println!("Ignoring malformed packet {}", error),
+            },
+            Err(error) => return Err(error),
+        }
     }
-    Ok(())
+}
+
+pub fn handle(addr: SocketAddr, src: SocketAddr, packet: tftp::Packet) -> Option<tftp::Packet> {
+    println!("Got packet {:?}", packet);
+    None
 }
 
 #[cfg(test)]
